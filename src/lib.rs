@@ -58,28 +58,12 @@ impl<R: Read> WPIReader<R> {
         Ok(u64::from_le_bytes(*final_buf))
     }
 
-    fn internal_next(&mut self) -> Result<PlainRecord> {
-        let mut bitfield = [0; 1];
-        self.reader.read_exact(&mut bitfield)?;
-        let bitfield = bitfield[0];
-
-        let entry_length = (bitfield & 0x3) + 1;
-        let size_length = ((bitfield >> 2) & 0x3) + 1;
-        let timestamp_length = ((bitfield >> 4) & 0x7) + 1;
-
-        let entry = self.read_variable_int(entry_length.into())? as u32;
-        let size = self.read_variable_int(size_length.into())? as usize;
-        let timestamp = self.read_variable_int(timestamp_length.into())?;
-
-        let mut data = vec![0; size].into_boxed_slice();
-
-        self.reader.read_exact(&mut data)?;
-
-        Ok(PlainRecord {
-            id: entry,
-            timestamp,
-            data,
-        })
+    fn read_variable_int_option(&mut self, length: usize) -> Option<u64> {
+        match self.read_variable_int(length) {
+            Ok(value) => Some(value),
+            // TODO: actually check what the error is
+            Err(_err) => None,
+        }
     }
 }
 
@@ -87,13 +71,35 @@ impl<R: Read> Iterator for WPIReader<R> {
     type Item = PlainRecord;
 
     fn next(&mut self) -> Option<Self::Item> {
-        match self.internal_next() {
-            Ok(item) => Some(item),
-            Err(err) => {
-                eprintln!("{err}");
-                None
-            }
+        let mut bitfield = [0; 1];
+
+        // TODO: actually check what the error is
+        if let Err(_err) = self.reader.read_exact(&mut bitfield) {
+            return None;
         }
+
+        let bitfield = bitfield[0];
+
+        let entry_length = (bitfield & 0x3) + 1;
+        let size_length = ((bitfield >> 2) & 0x3) + 1;
+        let timestamp_length = ((bitfield >> 4) & 0x7) + 1;
+
+        let entry = self.read_variable_int_option(entry_length.into())? as u32;
+        let size = self.read_variable_int_option(size_length.into())? as usize;
+        let timestamp = self.read_variable_int_option(timestamp_length.into())?;
+
+        let mut data = vec![0; size].into_boxed_slice();
+
+        // TODO: actually check what the error is
+        if let Err(_err) = self.reader.read_exact(&mut data) {
+            return None;
+        }
+
+        Some(PlainRecord {
+            id: entry,
+            timestamp,
+            data,
+        })
     }
 }
 
@@ -133,21 +139,6 @@ impl TryFrom<PlainRecord> for Record {
 
             let info = match rtype {
                 0 => {
-                    /*
-
-
-                    4-byte (32-bit) length of entry name string
-
-                    entry name UTF-8 string data (arbitrary length)
-
-                    4-byte (32-bit) length of entry type string
-
-                    entry type UTF-8 string data (arbitrary length)
-
-                    4-byte (32-bit) length of entry metadata string
-
-                    entry metadata UTF-8 string data (arbitrary length)
-                     */
                     let name = {
                         if record.data.len() < ptr + 4 {
                             return Err(format_err!("Not enough data for length of entry name"));
