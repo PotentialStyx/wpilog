@@ -1,3 +1,11 @@
+#![warn(clippy::pedantic, clippy::all)]
+// TODO: Remove these exceptions
+#![allow(
+    clippy::missing_errors_doc,
+    clippy::cast_possible_truncation,
+    clippy::too_many_lines
+)]
+
 use anyhow::{format_err, Result};
 use core::str;
 use std::io::{BufReader, Read};
@@ -11,13 +19,15 @@ pub struct WPIReader<R: Read> {
 }
 
 impl<R: Read> WPIReader<BufReader<R>> {
+    /// Takes a reader and wraps it in a [`BufReader`] before makings the [`WPIReader`]
+    /// This is way more efficient since the wpilog implementation makes a lot of small reads
     pub fn new_buffered(reader: R) -> Result<Self> {
         WPIReader::new_raw(BufReader::new(reader))
     }
 }
 
 impl<R: Read> WPIReader<R> {
-    /// Using new_buffered, or passing an already buffered reader is HIGHLY recommended
+    /// Using [`WPIReader::new_buffered()`], or passing an already buffered reader is HIGHLY recommended
     pub fn new_raw(mut reader: R) -> Result<Self> {
         // Read and check header
         let mut header = [0; 6];
@@ -50,14 +60,17 @@ impl<R: Read> WPIReader<R> {
         })
     }
 
-    /// 0 < length <= 8
+    /// Preconditions: `length <= 8`
     fn read_variable_int(&mut self, length: usize) -> Result<u64> {
+        debug_assert!(length <= 8, "Invalid variable int length {length}");
+
         let mut final_buf: Box<[u8; 8]> = Box::from([0; 8]);
         self.reader.read_exact(&mut final_buf[0..length])?;
 
         Ok(u64::from_le_bytes(*final_buf))
     }
 
+    /// Preconditions: `length <= 8`
     fn read_variable_int_option(&mut self, length: usize) -> Option<u64> {
         match self.read_variable_int(length) {
             Ok(value) => Some(value),
