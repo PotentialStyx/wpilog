@@ -1,4 +1,5 @@
 use anyhow::{format_err, Result};
+use core::str;
 use std::io::{BufReader, Read};
 
 static HEADER_STRING: &[u8; 6] = b"WPILOG";
@@ -57,7 +58,7 @@ impl<R: Read> WPIReader<R> {
         Ok(u64::from_le_bytes(*final_buf))
     }
 
-    fn internal_next(&mut self) -> Result<Record> {
+    fn internal_next(&mut self) -> Result<PlainRecord> {
         let mut bitfield = [0; 1];
         self.reader.read_exact(&mut bitfield)?;
         let bitfield = bitfield[0];
@@ -74,7 +75,7 @@ impl<R: Read> WPIReader<R> {
 
         self.reader.read_exact(&mut data)?;
 
-        Ok(Record {
+        Ok(PlainRecord {
             id: entry,
             timestamp,
             data,
@@ -83,7 +84,7 @@ impl<R: Read> WPIReader<R> {
 }
 
 impl<R: Read> Iterator for WPIReader<R> {
-    type Item = Record;
+    type Item = PlainRecord;
 
     fn next(&mut self) -> Option<Self::Item> {
         match self.internal_next() {
@@ -97,8 +98,202 @@ impl<R: Read> Iterator for WPIReader<R> {
 }
 
 #[derive(Debug)]
-pub struct Record {
+pub struct PlainRecord {
     pub id: u32,
     pub timestamp: u64,
     pub data: Box<[u8]>,
+}
+
+impl TryFrom<PlainRecord> for Record {
+    type Error = anyhow::Error;
+
+    fn try_from(record: PlainRecord) -> std::result::Result<Self, Self::Error> {
+        if record.id == 0 {
+            let mut ptr = 0;
+
+            if record.data.is_empty() {
+                return Err(format_err!("Not enough data"));
+            }
+
+            let rtype = record.data[ptr];
+
+            ptr += 1;
+
+            if record.data.len() < ptr + 4 {
+                return Err(format_err!("Not enough data for entry id"));
+            }
+
+            let id = u32::from_le_bytes([
+                record.data[ptr],
+                record.data[ptr + 1],
+                record.data[ptr + 2],
+                record.data[ptr + 3],
+            ]);
+            ptr += 4;
+
+            let info = match rtype {
+                0 => {
+                    /*
+
+
+                    4-byte (32-bit) length of entry name string
+
+                    entry name UTF-8 string data (arbitrary length)
+
+                    4-byte (32-bit) length of entry type string
+
+                    entry type UTF-8 string data (arbitrary length)
+
+                    4-byte (32-bit) length of entry metadata string
+
+                    entry metadata UTF-8 string data (arbitrary length)
+                     */
+                    let name = {
+                        if record.data.len() < ptr + 4 {
+                            return Err(format_err!("Not enough data for length of entry name"));
+                        }
+
+                        let length = u32::from_le_bytes([
+                            record.data[ptr],
+                            record.data[ptr + 1],
+                            record.data[ptr + 2],
+                            record.data[ptr + 3],
+                        ]) as usize;
+                        ptr += 4;
+
+                        if record.data.len() < ptr + length {
+                            return Err(format_err!("Not enough data for entry name"));
+                        }
+
+                        let res = str::from_utf8(&record.data[ptr..ptr + length])?
+                            .to_string()
+                            .into_boxed_str();
+                        ptr += length;
+
+                        res
+                    };
+
+                    let etype = {
+                        if record.data.len() < ptr + 4 {
+                            return Err(format_err!("Not enough data for length of entry type"));
+                        }
+
+                        let length = u32::from_le_bytes([
+                            record.data[ptr],
+                            record.data[ptr + 1],
+                            record.data[ptr + 2],
+                            record.data[ptr + 3],
+                        ]) as usize;
+                        ptr += 4;
+
+                        if record.data.len() < ptr + length {
+                            return Err(format_err!("Not enough data for entry type"));
+                        }
+
+                        let res = str::from_utf8(&record.data[ptr..ptr + length])?
+                            .to_string()
+                            .into_boxed_str();
+                        ptr += length;
+
+                        res
+                    };
+
+                    let metadata = {
+                        if record.data.len() < ptr + 4 {
+                            return Err(format_err!(
+                                "Not enough data for length of entry metadata"
+                            ));
+                        }
+
+                        let length = u32::from_le_bytes([
+                            record.data[ptr],
+                            record.data[ptr + 1],
+                            record.data[ptr + 2],
+                            record.data[ptr + 3],
+                        ]) as usize;
+                        ptr += 4;
+
+                        if record.data.len() < ptr + length {
+                            return Err(format_err!("Not enough data for entry metadata"));
+                        }
+
+                        str::from_utf8(&record.data[ptr..ptr + length])?
+                            .to_string()
+                            .into_boxed_str()
+                    };
+
+                    ControlData::Start {
+                        name,
+                        r#type: etype,
+                        metadata,
+                    }
+                }
+                1 => ControlData::Finish,
+                2 => {
+                    let metadata = {
+                        if record.data.len() < ptr + 4 {
+                            return Err(format_err!(
+                                "Not enough data for length of entry metadata"
+                            ));
+                        }
+
+                        let length = u32::from_le_bytes([
+                            record.data[ptr],
+                            record.data[ptr + 1],
+                            record.data[ptr + 2],
+                            record.data[ptr + 3],
+                        ]) as usize;
+                        ptr += 4;
+
+                        if record.data.len() < ptr + length {
+                            return Err(format_err!("Not enough data for entry metadata"));
+                        }
+
+                        str::from_utf8(&record.data[ptr..ptr + length])?
+                            .to_string()
+                            .into_boxed_str()
+                    };
+
+                    ControlData::SetMetadata(metadata)
+                }
+                _ => return Err(format_err!("Invalid Control Record Type: {rtype}")),
+            };
+
+            Ok(Record {
+                id,
+                timestamp: record.timestamp,
+                info: RecordInfo::Control(info),
+            })
+        } else {
+            Ok(Record {
+                id: record.id,
+                timestamp: record.timestamp,
+                info: RecordInfo::Data(record.data),
+            })
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Record {
+    pub id: u32,
+    pub timestamp: u64,
+    pub info: RecordInfo,
+}
+
+#[derive(Debug, Clone)]
+pub enum RecordInfo {
+    Control(ControlData),
+    Data(Box<[u8]>),
+}
+
+#[derive(Debug, Clone)]
+pub enum ControlData {
+    Start {
+        name: Box<str>,
+        r#type: Box<str>,
+        metadata: Box<str>,
+    },
+    Finish,
+    SetMetadata(Box<str>),
 }
