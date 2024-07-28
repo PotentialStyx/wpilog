@@ -114,7 +114,11 @@ impl<T: TimeProvider + Clone + Send + Sync> WPILOGWriter<T> {
         }
     }
 
-    /// Don't use this unless you know what you are doing
+    /// Don't use this unless you know what you are doing.
+    ///
+    /// This method returns a [`RawEntry`], which requires you enforce that data is given the right format.
+    ///
+    /// Messing up data formatting can result in tools being unable to interpret what your logged values actually mean.
     pub fn make_entry(
         &self,
         name: String,
@@ -140,13 +144,9 @@ impl<T: TimeProvider + Clone + Send + Sync> WPILOGWriter<T> {
         })
     }
 
-    // TODO: make this a better interface like the ones in `entrytypes.rs`
-    pub fn new_raw_entry(&self, name: String, metadata: Option<String>) -> Result<RawEntry<T>> {
-        self.make_entry(name, "raw".to_string(), metadata.unwrap_or_default())
-    }
-
     /// Instantly stops new messages from sending, and stops the worker after all previous messages have been written
-    /// Anything sent after will NOT BE RECORDED
+    ///
+    /// ANYTHING SENT AFTER THIS IS CALLED WILL NOT BE RECORDED, AND WILL BE LOST FOREVER!
     pub fn join(self) -> Result<()> {
         self.channel.send(RecvState::Stop)?;
 
@@ -158,6 +158,7 @@ impl<T: TimeProvider + Clone + Send + Sync> WPILOGWriter<T> {
     }
 }
 
+/// A handle to write raw byte data to the log file. Usually a wrapper type is used.
 pub struct RawEntry<T: TimeProvider + Clone + Send + Sync> {
     id: u32,
     channel: Sender<RecvState>,
@@ -165,6 +166,7 @@ pub struct RawEntry<T: TimeProvider + Clone + Send + Sync> {
 }
 
 impl Record {
+    /// Turn the [`Record`] into it's binary representation.
     fn encode(&self) -> Box<[u8]> {
         // TODO: Figure out slice size first
         // This should be possible but might not be that trivial...
@@ -289,10 +291,20 @@ impl Record {
 }
 
 impl<T: TimeProvider + Clone + Send + Sync> RawEntry<T> {
+    /// Logs the data given as-is, without checking if it's the right format for the entry type.
+    ///
+    /// Automatically fetches timestamp from the `time_provider`
     pub fn log_data(&self, data: Box<[u8]>) -> Result<()> {
+        self.log_data_ts(data, self.time_provider.get_time())
+    }
+
+    /// Logs the data given as-is, without checking if it's the right format for the entry type.
+    ///
+    /// Uses manually set timestamp instead of using the `time_provider`
+    pub fn log_data_ts(&self, data: Box<[u8]>, timestamp: u64) -> Result<()> {
         let record = Record {
             id: self.id,
-            timestamp: self.time_provider.get_time(),
+            timestamp,
             info: RecordInfo::Data(data),
         };
 
@@ -301,6 +313,7 @@ impl<T: TimeProvider + Clone + Send + Sync> RawEntry<T> {
         Ok(())
     }
 
+    /// Updates the metadata for the entry, normally this is JSON but it *can* be anything.
     pub fn set_metadata(&self, metadata: Box<str>) -> Result<()> {
         let record = Record {
             id: self.id,

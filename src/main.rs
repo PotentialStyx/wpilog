@@ -37,19 +37,25 @@ fn main() -> Result<()> {
     );
 
     let entry = writer.new_i64_entry("NT:Test/Key".into(), None)?;
+    let entry2 = writer.new_bool_array_entry("NT:Array/Booleans".into(), None)?;
     entry.update(0)?;
+    entry2.update(&[false])?;
 
     thread::sleep(Duration::from_secs(1));
     entry.update(5)?;
+    entry2.update(&[true])?;
 
     thread::sleep(Duration::from_secs(1));
     entry.update(10)?;
+    entry2.update(&[true, false])?;
 
     thread::sleep(Duration::from_secs(1));
     entry.update(15)?;
+    entry2.update(&[true, true])?;
 
     thread::sleep(Duration::from_secs(1));
     entry.update(65)?;
+    entry2.update(&[true, false, false])?;
 
     writer.join()?;
 
