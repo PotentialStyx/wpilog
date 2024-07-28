@@ -153,49 +153,38 @@ impl Record {
                         metadata,
                     } => {
                         let mut data = vec![0];
-                        data.write_all(&self.id.to_le_bytes())
-                            .expect("TODO: check if this can fail");
+                        data.extend_from_slice(&self.id.to_le_bytes());
 
                         let len: u32 = name.len().try_into().expect("TODO: deal with this");
-                        data.write_all(&len.to_le_bytes())
-                            .expect("TODO: check if this can fail");
+                        data.extend_from_slice(&len.to_le_bytes());
 
-                        data.write_all(name.as_bytes())
-                            .expect("TODO: check if this can fail");
+                        data.extend_from_slice(name.as_bytes());
 
                         let len: u32 = r#type.len().try_into().expect("TODO: deal with this");
-                        data.write_all(&len.to_le_bytes())
-                            .expect("TODO: check if this can fail");
+                        data.extend_from_slice(&len.to_le_bytes());
 
-                        data.write_all(r#type.as_bytes())
-                            .expect("TODO: check if this can fail");
+                        data.extend_from_slice(r#type.as_bytes());
 
                         let len: u32 = metadata.len().try_into().expect("TODO: deal with this");
-                        data.write_all(&len.to_le_bytes())
-                            .expect("TODO: check if this can fail");
+                        data.extend_from_slice(&len.to_le_bytes());
 
-                        data.write_all(metadata.as_bytes())
-                            .expect("TODO: check if this can fail");
+                        data.extend_from_slice(metadata.as_bytes());
 
                         data
                     }
                     ControlData::Finish => {
                         let mut data = vec![1];
-                        data.write_all(&self.id.to_le_bytes())
-                            .expect("TODO: check if this can fail");
+                        data.extend_from_slice(&self.id.to_le_bytes());
                         data
                     }
                     ControlData::SetMetadata(metadata) => {
                         let mut data = vec![2];
-                        data.write_all(&self.id.to_le_bytes())
-                            .expect("TODO: check if this can fail");
+                        data.extend_from_slice(&self.id.to_le_bytes());
 
                         let len: u32 = metadata.len().try_into().expect("TODO: deal with this");
-                        data.write_all(&len.to_le_bytes())
-                            .expect("TODO: check if this can fail");
+                        data.extend_from_slice(&len.to_le_bytes());
 
-                        data.write_all(metadata.as_bytes())
-                            .expect("TODO: check if this can fail");
+                        data.extend_from_slice(metadata.as_bytes());
 
                         data
                     }
@@ -210,11 +199,9 @@ impl Record {
 
                 tmp.push(bitfield);
 
-                tmp.write_all(&[0]).expect("TODO: check if this can fail");
-                tmp.write_all(&size_data)
-                    .expect("TODO: check if this can fail");
-                tmp.write_all(&timestamp_data)
-                    .expect("TODO: check if this can fail");
+                tmp.extend_from_slice(&[0]);
+                tmp.extend_from_slice(&size_data);
+                tmp.extend_from_slice(&timestamp_data);
 
                 tmp.append(&mut data);
             }
@@ -235,14 +222,11 @@ impl Record {
 
                 tmp.push(bitfield);
 
-                tmp.write_all(&id_data)
-                    .expect("TODO: check if this can fail");
-                tmp.write_all(&size_data)
-                    .expect("TODO: check if this can fail");
-                tmp.write_all(&timestamp_data)
-                    .expect("TODO: check if this can fail");
+                tmp.extend_from_slice(&id_data);
+                tmp.extend_from_slice(&size_data);
+                tmp.extend_from_slice(&timestamp_data);
 
-                tmp.write_all(data).expect("TODO: check if this can fail");
+                tmp.extend_from_slice(data);
             }
         }
 
