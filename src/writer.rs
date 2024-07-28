@@ -8,15 +8,15 @@ use std::{
 
 use crate::{ControlData, Record, RecordInfo, HEADER_STRING, HEADER_VERSION};
 
-const MAX_ONE_BYTE: u64 = 256u64;
-const MAX_TWO_BYTES: u64 = 256u64.pow(2);
-const MAX_THREE_BYTES: u64 = 256u64.pow(3);
-const MAX_FOUR_BYTES: u64 = 256u64.pow(4);
-const MAX_FIVE_BYTES: u64 = 256u64.pow(5);
-const MAX_SIX_BYTES: u64 = 256u64.pow(6);
-const MAX_SEVEN_BYTES: u64 = 256u64.pow(7);
+pub(crate) const MAX_ONE_BYTE: u64 = 256u64;
+pub(crate) const MAX_TWO_BYTES: u64 = 256u64.pow(2);
+pub(crate) const MAX_THREE_BYTES: u64 = 256u64.pow(3);
+pub(crate) const MAX_FOUR_BYTES: u64 = 256u64.pow(4);
+pub(crate) const MAX_FIVE_BYTES: u64 = 256u64.pow(5);
+pub(crate) const MAX_SIX_BYTES: u64 = 256u64.pow(6);
+pub(crate) const MAX_SEVEN_BYTES: u64 = 256u64.pow(7);
 
-fn encode_int(num: u64) -> Box<[u8]> {
+pub(crate) fn encode_int(num: u64) -> Box<[u8]> {
     match num {
         0..MAX_ONE_BYTE => Box::new([num as u8]),
         MAX_ONE_BYTE..MAX_TWO_BYTES => Box::new((num as u16).to_le_bytes()),
@@ -38,6 +38,30 @@ fn encode_int(num: u64) -> Box<[u8]> {
             Box::new([tmp[0], tmp[1], tmp[2], tmp[3], tmp[4], tmp[5], tmp[6]])
         }
         _ => Box::new(num.to_le_bytes()),
+    }
+}
+
+pub(crate) fn encode_int2(num: u64) -> Box<[u8]> {
+    if num < MAX_ONE_BYTE {
+        Box::new([num as u8])
+    } else if num < MAX_TWO_BYTES {
+        Box::new((num as u16).to_le_bytes())
+    } else if num < MAX_THREE_BYTES {
+        let tmp = (num as u32).to_le_bytes();
+        Box::new([tmp[0], tmp[1], tmp[2]])
+    } else if num < MAX_FOUR_BYTES {
+        Box::new((num as u32).to_le_bytes())
+    } else if num < MAX_FIVE_BYTES {
+        let tmp = num.to_le_bytes();
+        Box::new([tmp[0], tmp[1], tmp[2], tmp[3], tmp[4]])
+    } else if num < MAX_SIX_BYTES {
+        let tmp = num.to_le_bytes();
+        Box::new([tmp[0], tmp[1], tmp[2], tmp[3], tmp[4], tmp[5]])
+    } else if num < MAX_SEVEN_BYTES {
+        let tmp = num.to_le_bytes();
+        Box::new([tmp[0], tmp[1], tmp[2], tmp[3], tmp[4], tmp[5], tmp[6]])
+    } else {
+        Box::new(num.to_le_bytes())
     }
 }
 
@@ -72,8 +96,6 @@ impl<T: TimeProvider + Clone + Send + Sync> WPILOGWriter<T> {
             for item in recv {
                 match item {
                     RecvState::Msg(data) => {
-                        dbg!(&data);
-
                         writer.write_all(&data).unwrap();
                     }
                     RecvState::Stop => {
@@ -142,7 +164,7 @@ impl Record {
         // This should be possible but might not be that trivial...
         let mut tmp = vec![];
 
-        let timestamp_data = encode_int(self.timestamp);
+        let timestamp_data = encode_int2(self.timestamp);
 
         match &self.info {
             RecordInfo::Control(ctrl) => {
@@ -190,7 +212,7 @@ impl Record {
                     }
                 };
 
-                let size_data = encode_int(data.len() as u64);
+                let size_data = encode_int2(data.len() as u64);
 
                 let mut bitfield = 0;
                 // These HAVE to be u8's after the & 0x3/0x7
@@ -206,8 +228,13 @@ impl Record {
                 tmp.append(&mut data);
             }
             RecordInfo::Data(data) => {
-                let id_data = encode_int(self.id.into());
-                let size_data = encode_int(data.len() as u64);
+                debug_assert_ne!(
+                    self.id, 0,
+                    "Data records can't have ID 0 or stuff will go wrong"
+                );
+
+                let id_data = encode_int2(self.id.into());
+                let size_data = encode_int2(data.len() as u64);
 
                 tmp.reserve(
                     id_data.len() + size_data.len() + timestamp_data.len() + data.len() + 1,
