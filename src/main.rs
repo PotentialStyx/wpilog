@@ -6,6 +6,7 @@ use std::{
     time::{Duration, Instant},
 };
 use wpilog::{
+    entrytypes::Entry,
     reader::{PlainRecord, WPILOGReader},
     writer::{TimeProvider, WPILOGWriter},
     Record,
@@ -35,17 +36,20 @@ fn main() -> Result<()> {
         },
     );
 
-    let entry = writer.make_entry("NT:Test/Key".into(), "int64".into(), String::new())?;
-    entry.log_data(Box::new(0u64.to_le_bytes()))?;
+    let entry = writer.new_i64_entry("NT:Test/Key".into(), None)?;
+    entry.update(0)?;
 
     thread::sleep(Duration::from_secs(1));
-    entry.log_data(Box::new(5u64.to_le_bytes()))?;
+    entry.update(5)?;
 
     thread::sleep(Duration::from_secs(1));
-    entry.log_data(Box::new(10u64.to_le_bytes()))?;
+    entry.update(10)?;
 
     thread::sleep(Duration::from_secs(1));
-    entry.log_data(Box::new(15u64.to_le_bytes()))?;
+    entry.update(15)?;
+
+    thread::sleep(Duration::from_secs(1));
+    entry.update(65)?;
 
     writer.join()?;
 

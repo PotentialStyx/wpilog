@@ -114,12 +114,13 @@ impl<T: TimeProvider + Clone + Send + Sync> WPILOGWriter<T> {
         }
     }
 
+    /// Don't use this unless you know what you are doing
     pub fn make_entry(
         &self,
         name: String,
         r#type: String,
         metadata: String,
-    ) -> Result<WPILOGEntry<T>> {
+    ) -> Result<RawEntry<T>> {
         let id = self.id.fetch_add(1, Ordering::Relaxed);
         let record = Record {
             id,
@@ -132,11 +133,16 @@ impl<T: TimeProvider + Clone + Send + Sync> WPILOGWriter<T> {
         };
         self.channel.send(RecvState::Msg(record.encode()))?;
 
-        Ok(WPILOGEntry {
+        Ok(RawEntry {
             id,
             channel: self.channel.clone(),
             time_provider: self.time_provider.clone(),
         })
+    }
+
+    // TODO: make this a better interface like the ones in `entrytypes.rs`
+    pub fn new_raw_entry(&self, name: String, metadata: Option<String>) -> Result<RawEntry<T>> {
+        self.make_entry(name, "raw".to_string(), metadata.unwrap_or_default())
     }
 
     /// Instantly stops new messages from sending, and stops the worker after all previous messages have been written
@@ -152,7 +158,7 @@ impl<T: TimeProvider + Clone + Send + Sync> WPILOGWriter<T> {
     }
 }
 
-pub struct WPILOGEntry<T: TimeProvider + Clone + Send + Sync> {
+pub struct RawEntry<T: TimeProvider + Clone + Send + Sync> {
     id: u32,
     channel: Sender<RecvState>,
     time_provider: T,
@@ -162,12 +168,13 @@ impl Record {
     fn encode(&self) -> Box<[u8]> {
         // TODO: Figure out slice size first
         // This should be possible but might not be that trivial...
-        let mut tmp = vec![];
 
         let timestamp_data = encode_int2(self.timestamp);
 
         match &self.info {
             RecordInfo::Control(ctrl) => {
+                let mut ret = vec![];
+
                 let mut data = match ctrl {
                     ControlData::Start {
                         name,
@@ -195,9 +202,8 @@ impl Record {
                         data
                     }
                     ControlData::Finish => {
-                        let mut data = vec![1];
-                        data.extend_from_slice(&self.id.to_le_bytes());
-                        data
+                        let encoded = &self.id.to_le_bytes();
+                        vec![1, encoded[0], encoded[1], encoded[2], encoded[3]]
                     }
                     ControlData::SetMetadata(metadata) => {
                         let mut data = vec![2];
@@ -219,13 +225,15 @@ impl Record {
                 bitfield |= (((size_data.len() - 1) & 0x3) as u8) << 2;
                 bitfield |= (((timestamp_data.len() - 1) & 0x7) as u8) << 4;
 
-                tmp.push(bitfield);
+                ret.push(bitfield);
 
-                tmp.extend_from_slice(&[0]);
-                tmp.extend_from_slice(&size_data);
-                tmp.extend_from_slice(&timestamp_data);
+                ret.extend_from_slice(&[0]);
+                ret.extend_from_slice(&size_data);
+                ret.extend_from_slice(&timestamp_data);
 
-                tmp.append(&mut data);
+                ret.append(&mut data);
+
+                ret.into_boxed_slice()
             }
             RecordInfo::Data(data) => {
                 debug_assert_ne!(
@@ -236,9 +244,9 @@ impl Record {
                 let id_data = encode_int2(self.id.into());
                 let size_data = encode_int2(data.len() as u64);
 
-                tmp.reserve(
-                    id_data.len() + size_data.len() + timestamp_data.len() + data.len() + 1,
-                );
+                let length =
+                    id_data.len() + size_data.len() + timestamp_data.len() + data.len() + 1;
+                let mut ret = vec![0; length].into_boxed_slice();
 
                 let mut bitfield = 0;
 
@@ -247,30 +255,74 @@ impl Record {
                 bitfield |= (((size_data.len() - 1) & 0x3) as u8) << 2;
                 bitfield |= (((timestamp_data.len() - 1) & 0x7) as u8) << 4;
 
-                tmp.push(bitfield);
+                ret[0] = bitfield;
 
-                tmp.extend_from_slice(&id_data);
-                tmp.extend_from_slice(&size_data);
-                tmp.extend_from_slice(&timestamp_data);
+                let mut ptr = 1;
+                for data in id_data {
+                    ret[ptr] = data;
 
-                tmp.extend_from_slice(data);
+                    ptr += 1;
+                }
+
+                for data in size_data {
+                    ret[ptr] = data;
+
+                    ptr += 1;
+                }
+
+                for data in timestamp_data {
+                    ret[ptr] = data;
+
+                    ptr += 1;
+                }
+
+                for data in data {
+                    ret[ptr] = *data;
+
+                    ptr += 1;
+                }
+
+                ret
             }
         }
-
-        tmp.into_boxed_slice()
     }
 }
 
-impl<T: TimeProvider + Clone + Send + Sync> WPILOGEntry<T> {
+impl<T: TimeProvider + Clone + Send + Sync> RawEntry<T> {
     pub fn log_data(&self, data: Box<[u8]>) -> Result<()> {
         let record = Record {
             id: self.id,
             timestamp: self.time_provider.get_time(),
-            info: crate::RecordInfo::Data(data),
+            info: RecordInfo::Data(data),
         };
 
         self.channel.send(RecvState::Msg(record.encode()))?;
 
         Ok(())
+    }
+
+    pub fn set_metadata(&self, metadata: Box<str>) -> Result<()> {
+        let record = Record {
+            id: self.id,
+            timestamp: self.time_provider.get_time(),
+            info: RecordInfo::Control(ControlData::SetMetadata(metadata)),
+        };
+
+        self.channel.send(RecvState::Msg(record.encode()))?;
+
+        Ok(())
+    }
+}
+
+impl<T: TimeProvider + Clone + Send + Sync> Drop for RawEntry<T> {
+    fn drop(&mut self) {
+        let record = Record {
+            id: self.id,
+            timestamp: self.time_provider.get_time(),
+            info: RecordInfo::Control(ControlData::Finish),
+        };
+
+        // Best attempt at nice cleanup, if it fails oh well...
+        let _ = self.channel.send(RecvState::Msg(record.encode()));
     }
 }

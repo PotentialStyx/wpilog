@@ -15,6 +15,7 @@ mod tests;
 static HEADER_STRING: &[u8; 6] = b"WPILOG";
 static HEADER_VERSION: u16 = 0x0100;
 
+pub mod entrytypes;
 pub mod reader;
 pub mod writer;
 
