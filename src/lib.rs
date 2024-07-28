@@ -1,4 +1,3 @@
-#![feature(test)]
 #![warn(clippy::pedantic, clippy::all)]
 #![allow(
     clippy::module_name_repetitions,
@@ -8,9 +7,6 @@
     clippy::cast_possible_truncation,
     clippy::too_many_lines,
 )]
-
-#[cfg(test)]
-mod tests;
 
 static HEADER_STRING: &[u8; 6] = b"WPILOG";
 static HEADER_VERSION: u16 = 0x0100;

@@ -17,31 +17,6 @@ pub(crate) const MAX_SIX_BYTES: u64 = 256u64.pow(6);
 pub(crate) const MAX_SEVEN_BYTES: u64 = 256u64.pow(7);
 
 pub(crate) fn encode_int(num: u64) -> Box<[u8]> {
-    match num {
-        0..MAX_ONE_BYTE => Box::new([num as u8]),
-        MAX_ONE_BYTE..MAX_TWO_BYTES => Box::new((num as u16).to_le_bytes()),
-        MAX_TWO_BYTES..MAX_THREE_BYTES => {
-            let tmp = (num as u32).to_le_bytes();
-            Box::new([tmp[0], tmp[1], tmp[2]])
-        }
-        MAX_THREE_BYTES..MAX_FOUR_BYTES => Box::new((num as u32).to_le_bytes()),
-        MAX_FOUR_BYTES..MAX_FIVE_BYTES => {
-            let tmp = num.to_le_bytes();
-            Box::new([tmp[0], tmp[1], tmp[2], tmp[3], tmp[4]])
-        }
-        MAX_FIVE_BYTES..MAX_SIX_BYTES => {
-            let tmp = num.to_le_bytes();
-            Box::new([tmp[0], tmp[1], tmp[2], tmp[3], tmp[4], tmp[5]])
-        }
-        MAX_SIX_BYTES..MAX_SEVEN_BYTES => {
-            let tmp = num.to_le_bytes();
-            Box::new([tmp[0], tmp[1], tmp[2], tmp[3], tmp[4], tmp[5], tmp[6]])
-        }
-        _ => Box::new(num.to_le_bytes()),
-    }
-}
-
-pub(crate) fn encode_int2(num: u64) -> Box<[u8]> {
     if num < MAX_ONE_BYTE {
         Box::new([num as u8])
     } else if num < MAX_TWO_BYTES {
@@ -162,7 +137,7 @@ impl<T: TimeProvider + Clone + Send + Sync> WPILOGWriter<T> {
 pub struct RawEntry<T: TimeProvider + Clone + Send + Sync> {
     id: u32,
     channel: Sender<RecvState>,
-    time_provider: T,
+    pub(super) time_provider: T,
 }
 
 impl Record {
@@ -171,7 +146,7 @@ impl Record {
         // TODO: Figure out slice size first
         // This should be possible but might not be that trivial...
 
-        let timestamp_data = encode_int2(self.timestamp);
+        let timestamp_data = encode_int(self.timestamp);
 
         match &self.info {
             RecordInfo::Control(ctrl) => {
@@ -220,7 +195,7 @@ impl Record {
                     }
                 };
 
-                let size_data = encode_int2(data.len() as u64);
+                let size_data = encode_int(data.len() as u64);
 
                 let mut bitfield = 0;
                 // These HAVE to be u8's after the & 0x3/0x7
@@ -243,8 +218,8 @@ impl Record {
                     "Data records can't have ID 0 or stuff will go wrong"
                 );
 
-                let id_data = encode_int2(self.id.into());
-                let size_data = encode_int2(data.len() as u64);
+                let id_data = encode_int(self.id.into());
+                let size_data = encode_int(data.len() as u64);
 
                 let length =
                     id_data.len() + size_data.len() + timestamp_data.len() + data.len() + 1;
@@ -295,13 +270,13 @@ impl<T: TimeProvider + Clone + Send + Sync> RawEntry<T> {
     ///
     /// Automatically fetches timestamp from the `time_provider`
     pub fn log_data(&self, data: Box<[u8]>) -> Result<()> {
-        self.log_data_ts(data, self.time_provider.get_time())
+        self.log_data_with_timestamp(data, self.time_provider.get_time())
     }
 
     /// Logs the data given as-is, without checking if it's the right format for the entry type.
     ///
     /// Uses manually set timestamp instead of using the `time_provider`
-    pub fn log_data_ts(&self, data: Box<[u8]>, timestamp: u64) -> Result<()> {
+    pub fn log_data_with_timestamp(&self, data: Box<[u8]>, timestamp: u64) -> Result<()> {
         let record = Record {
             id: self.id,
             timestamp,

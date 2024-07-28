@@ -23,55 +23,81 @@ impl TimeProvider for SimpleTimeProvider {
     }
 }
 
+#[derive(Copy, Clone, Debug)]
+struct NoopTimeProvider {}
+
+impl TimeProvider for NoopTimeProvider {
+    fn get_time(&self) -> u64 {
+        0
+    }
+}
+
 fn main() -> Result<()> {
     let file = fs::OpenOptions::new()
         .write(true)
         .create_new(true)
         .open("test2.wpilog")?;
 
-    let writer = WPILOGWriter::new(
-        file,
-        SimpleTimeProvider {
-            start: Instant::now(),
-        },
-    );
+    let writer = WPILOGWriter::new(file, NoopTimeProvider {});
 
-    let entry = writer.new_i64_entry("NT:Test/Key".into(), None)?;
-    let entry2 = writer.new_bool_array_entry("NT:Array/Booleans".into(), None)?;
-    entry.update(0)?;
-    entry2.update(&[false])?;
+    let raw = writer.new_bytes_entry("NT:Primitives/raw".into(), None)?;
+    let int64 = writer.new_i64_entry("NT:Primitives/i64".into(), None)?;
+    let float = writer.new_f32_entry("NT:Primitives/float".into(), None)?;
+    let double = writer.new_f64_entry("NT:Primitives/double".into(), None)?;
+    let string = writer.new_string_entry("NT:Primitives/string".into(), None)?;
 
-    thread::sleep(Duration::from_secs(1));
-    entry.update(5)?;
-    entry2.update(&[true])?;
+    let boolean_array = writer.new_bool_array_entry("NT:Array/Booleans".into(), None)?;
 
-    thread::sleep(Duration::from_secs(1));
-    entry.update(10)?;
-    entry2.update(&[true, false])?;
+    let time = 1_000_000;
+    raw.update_with_timestamp(Box::new([0, 0]), time)?;
+    int64.update_with_timestamp(1, time)?;
+    float.update_with_timestamp(0.25, time)?;
+    double.update_with_timestamp(0.00000000025, time)?;
+    string.update_with_timestamp("Hello".into(), time)?;
+    boolean_array.update_with_timestamp(&[false, false], time)?;
 
-    thread::sleep(Duration::from_secs(1));
-    entry.update(15)?;
-    entry2.update(&[true, true])?;
+    let time = 2_000_000;
+    raw.update_with_timestamp(Box::new([0, 1]), time)?;
+    int64.update_with_timestamp(2, time)?;
+    float.update_with_timestamp(0.50, time)?;
+    double.update_with_timestamp(0.00000000050, time)?;
+    string.update_with_timestamp(", ".into(), time)?;
+    boolean_array.update_with_timestamp(&[false, true], time)?;
 
-    thread::sleep(Duration::from_secs(1));
-    entry.update(65)?;
-    entry2.update(&[true, false, false])?;
+    let time = 3_000_000;
+    raw.update_with_timestamp(Box::new([1, 1]), time)?;
+    int64.update_with_timestamp(4, time)?;
+    float.update_with_timestamp(0.75, time)?;
+    double.update_with_timestamp(0.00000000075, time)?;
+    string.update_with_timestamp("World".into(), time)?;
+    boolean_array.update_with_timestamp(&[true, false], time)?;
+
+    let time = 4_000_000;
+    raw.update_with_timestamp(Box::new([1, 0]), time)?;
+    int64.update_with_timestamp(8, time)?;
+    float.update_with_timestamp(1.0, time)?;
+    double.update_with_timestamp(0.00000000010, time)?;
+    string.update_with_timestamp("!".into(), time)?;
+    boolean_array.update_with_timestamp(&[true, true], time)?;
+
+    let time = 5_000_000;
+    int64.update_with_timestamp(8, time)?;
 
     writer.join()?;
 
-    let data: &[u8] = &fs::read("test2.wpilog")?;
+    // let data: &[u8] = &fs::read("test2.wpilog")?;
 
-    let reader = WPILOGReader::new_raw(data)?;
+    // let reader = WPILOGReader::new_raw(data)?;
 
-    let mut records = 0;
-    for record in reader.map(|item: PlainRecord| -> Record { item.try_into().unwrap() }) {
-        if records < 50 {
-            black_box(dbg!(record));
-        }
+    // let mut records = 0;
+    // for record in reader.map(|item: PlainRecord| -> Record { item.try_into().unwrap() }) {
+    //     if records < 50 {
+    //         black_box(dbg!(record));
+    //     }
 
-        records += 1;
-    }
+    //     records += 1;
+    // }
 
-    black_box(dbg!(records));
+    // black_box(dbg!(records));
     Ok(())
 }

@@ -4,6 +4,8 @@ use crate::writer::{RawEntry, TimeProvider, WPILOGWriter};
 
 pub trait Entry<T> {
     fn update(&self, data: T) -> Result<()>;
+
+    fn update_with_timestamp(&self, data: T, timestamp: u64) -> Result<()>;
 }
 
 macro_rules! new_entry_func {
@@ -22,14 +24,18 @@ macro_rules! new_entry_func {
 }
 
 impl<T: TimeProvider + Clone + Send + Sync> WPILOGWriter<T> {
+    new_entry_func!(new_bytes_entry, BytesEntry, "raw");
+
     new_entry_func!(new_bool_entry, BooleanEntry, "boolean");
     new_entry_func!(new_i64_entry, I64Entry, "int64");
     new_entry_func!(new_f32_entry, F32Entry, "float");
     new_entry_func!(new_f64_entry, F64Entry, "double");
     new_entry_func!(new_string_entry, StringEntry, "string");
-    new_entry_func!(new_bytes_entry, BytesEntry, "raw");
 
     new_entry_func!(new_bool_array_entry, BooleanArrayEntry, "boolean[]");
+    new_entry_func!(new_i64_array_entry, I64ArrayEntry, "int64[]");
+    new_entry_func!(new_f32_array_entry, F32ArrayEntry, "float[]");
+    new_entry_func!(new_f64_array_entry, F64ArrayEntry, "double[]");
 }
 
 macro_rules! make_entry_type {
@@ -38,38 +44,24 @@ macro_rules! make_entry_type {
     };
 }
 
-/* Doesn't really work that well:
-macro_rules! impl_entry_type {
-    {
-        impl $name:ident {
-            fn update(&self, $var:ident: $type:ty) $code:block
-
-        }
-    } => {
-        impl<T: TimeProvider + Clone + Send + Sync> Entry<$type> for $name<T> {
-            fn update(&self, $var: $type) -> Result<()> {
-                self.inner.log_data(Box::new($code))
-            }
+macro_rules! update_fn {
+    ($type:ty) => {
+        fn update(&self, data: $type) -> Result<()> {
+            self.update_with_timestamp(data, self.0.time_provider.get_time())
         }
     };
 }
-
-impl_entry_type! {
-    impl BooleanEntry {
-        fn update(&self, data: bool) {
-            [u8::from(data)]
-        }
-    }
-}
-*/
 
 macro_rules! full_entry_type {
     ($name:ident, $type:ty) => {
         make_entry_type!($name);
 
         impl<T: TimeProvider + Clone + Send + Sync> Entry<$type> for $name<T> {
-            fn update(&self, data: $type) -> Result<()> {
-                self.0.log_data(Box::new(data.to_le_bytes()))
+            update_fn!($type);
+
+            fn update_with_timestamp(&self, data: $type, timestamp: u64) -> Result<()> {
+                self.0
+                    .log_data_with_timestamp(Box::new(data.to_le_bytes()), timestamp)
             }
         }
     };
@@ -84,24 +76,32 @@ full_entry_type!(F64Entry, f64);
 make_entry_type!(BooleanEntry);
 
 impl<T: TimeProvider + Clone + Send + Sync> Entry<bool> for BooleanEntry<T> {
-    fn update(&self, data: bool) -> Result<()> {
-        self.0.log_data(Box::new([u8::from(data)]))
+    update_fn!(bool);
+
+    fn update_with_timestamp(&self, data: bool, timestamp: u64) -> Result<()> {
+        self.0
+            .log_data_with_timestamp(Box::new([u8::from(data)]), timestamp)
     }
 }
 
 make_entry_type!(BytesEntry);
 
 impl<T: TimeProvider + Clone + Send + Sync> Entry<Box<[u8]>> for BytesEntry<T> {
-    fn update(&self, data: Box<[u8]>) -> Result<()> {
-        self.0.log_data(data)
+    update_fn!(Box<[u8]>);
+
+    fn update_with_timestamp(&self, data: Box<[u8]>, timestamp: u64) -> Result<()> {
+        self.0.log_data_with_timestamp(data, timestamp)
     }
 }
 
 make_entry_type!(StringEntry);
 
 impl<T: TimeProvider + Clone + Send + Sync> Entry<String> for StringEntry<T> {
-    fn update(&self, data: String) -> Result<()> {
-        self.0.log_data(data.into_boxed_str().into())
+    update_fn!(String);
+
+    fn update_with_timestamp(&self, data: String, timestamp: u64) -> Result<()> {
+        self.0
+            .log_data_with_timestamp(data.into_boxed_str().into(), timestamp)
     }
 }
 
@@ -109,7 +109,9 @@ impl<T: TimeProvider + Clone + Send + Sync> Entry<String> for StringEntry<T> {
 make_entry_type!(BooleanArrayEntry);
 
 impl<T: TimeProvider + Clone + Send + Sync> Entry<&[bool]> for BooleanArrayEntry<T> {
-    fn update(&self, data: &[bool]) -> Result<()> {
+    update_fn!(&[bool]);
+
+    fn update_with_timestamp(&self, data: &[bool], timestamp: u64) -> Result<()> {
         let mut tmp = vec![0; data.len()].into_boxed_slice();
 
         // TODO: There has to be a better way to do this
@@ -117,6 +119,89 @@ impl<T: TimeProvider + Clone + Send + Sync> Entry<&[bool]> for BooleanArrayEntry
             tmp[i] = u8::from(*item);
         }
 
-        self.0.log_data(tmp)
+        self.0.log_data_with_timestamp(tmp, timestamp)
+    }
+}
+
+make_entry_type!(I64ArrayEntry);
+
+impl<T: TimeProvider + Clone + Send + Sync> Entry<&[i64]> for I64ArrayEntry<T> {
+    update_fn!(&[i64]);
+
+    fn update_with_timestamp(&self, data: &[i64], timestamp: u64) -> Result<()> {
+        let mut dest = vec![0; data.len() * 4].into_boxed_slice();
+
+        let mut i = 0;
+        for item in data {
+            let encoded = item.to_le_bytes();
+            dest[i] = encoded[0];
+            i += 1;
+            dest[i] = encoded[1];
+            i += 1;
+            dest[i] = encoded[2];
+            i += 1;
+            dest[i] = encoded[3];
+            i += 1;
+        }
+
+        self.0.log_data_with_timestamp(dest, timestamp)
+    }
+}
+
+make_entry_type!(F32ArrayEntry);
+
+impl<T: TimeProvider + Clone + Send + Sync> Entry<&[f32]> for F32ArrayEntry<T> {
+    update_fn!(&[f32]);
+
+    fn update_with_timestamp(&self, data: &[f32], timestamp: u64) -> Result<()> {
+        let mut dest = vec![0; data.len() * 4].into_boxed_slice();
+
+        let mut i = 0;
+        for item in data {
+            let encoded = item.to_le_bytes();
+            dest[i] = encoded[0];
+            i += 1;
+            dest[i] = encoded[1];
+            i += 1;
+            dest[i] = encoded[2];
+            i += 1;
+            dest[i] = encoded[3];
+            i += 1;
+        }
+
+        self.0.log_data_with_timestamp(dest, timestamp)
+    }
+}
+
+make_entry_type!(F64ArrayEntry);
+
+impl<T: TimeProvider + Clone + Send + Sync> Entry<&[f64]> for F64ArrayEntry<T> {
+    update_fn!(&[f64]);
+
+    fn update_with_timestamp(&self, data: &[f64], timestamp: u64) -> Result<()> {
+        let mut dest = vec![0; data.len() * 8].into_boxed_slice();
+
+        let mut i = 0;
+        for item in data {
+            let encoded = item.to_le_bytes();
+            dest[i] = encoded[0];
+            i += 1;
+            dest[i] = encoded[1];
+            i += 1;
+            dest[i] = encoded[2];
+            i += 1;
+            dest[i] = encoded[3];
+            i += 1;
+            dest[i] = encoded[4];
+            i += 1;
+            dest[i] = encoded[5];
+            i += 1;
+            dest[i] = encoded[6];
+            i += 1;
+            dest[i] = encoded[7];
+            i += 1;
+        }
+
+        self.0.log_data_with_timestamp(dest, timestamp)
     }
 }
