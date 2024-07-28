@@ -36,6 +36,7 @@ impl<T: TimeProvider + Clone + Send + Sync> WPILOGWriter<T> {
     new_entry_func!(new_i64_array_entry, I64ArrayEntry, "int64[]");
     new_entry_func!(new_f32_array_entry, F32ArrayEntry, "float[]");
     new_entry_func!(new_f64_array_entry, F64ArrayEntry, "double[]");
+    new_entry_func!(new_string_array_entry, StringArrayEntry, "string[]");
 }
 
 macro_rules! make_entry_type {
@@ -200,6 +201,43 @@ impl<T: TimeProvider + Clone + Send + Sync> Entry<&[f64]> for F64ArrayEntry<T> {
             i += 1;
             dest[i] = encoded[7];
             i += 1;
+        }
+
+        self.0.log_data_with_timestamp(dest, timestamp)
+    }
+}
+
+make_entry_type!(StringArrayEntry);
+impl<T: TimeProvider + Clone + Send + Sync> Entry<&[&str]> for StringArrayEntry<T> {
+    update_fn!(&[&str]);
+
+    fn update_with_timestamp(&self, data: &[&str], timestamp: u64) -> Result<()> {
+        let length = 4 + 4 * data.len() + data.iter().map(|string| str::len(string)).sum::<usize>();
+
+        let mut dest = vec![0; length].into_boxed_slice();
+        let size_encoded = (data.len() as u32).to_le_bytes();
+        dest[0] = size_encoded[0];
+        dest[1] = size_encoded[1];
+        dest[2] = size_encoded[2];
+        dest[3] = size_encoded[3];
+
+        let mut i = 4;
+        for item in data {
+            let size_encoded = (item.len() as u32).to_le_bytes();
+            dest[i] = size_encoded[0];
+            i += 1;
+            dest[i] = size_encoded[1];
+            i += 1;
+            dest[i] = size_encoded[2];
+            i += 1;
+            dest[i] = size_encoded[3];
+            i += 1;
+
+            let encoded = item.as_bytes();
+            for byte in encoded {
+                dest[i] = *byte;
+                i += 1;
+            }
         }
 
         self.0.log_data_with_timestamp(dest, timestamp)
