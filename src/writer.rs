@@ -2,6 +2,7 @@ use anyhow::{format_err, Result};
 use kanal::Sender;
 use std::{
     io::Write,
+    ops::Deref,
     sync::atomic::{AtomicU32, Ordering},
     thread::JoinHandle,
 };
@@ -49,18 +50,36 @@ enum RecvState {
     Stop,
 }
 
-pub struct WPILOGWriter<T: TimeProvider + Clone + Send + Sync> {
+struct StopOnDropSender(Sender<RecvState>);
+
+impl Deref for StopOnDropSender {
+    type Target = Sender<RecvState>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl Drop for StopOnDropSender {
+    fn drop(&mut self) {
+        // Try our best to stop the thread...
+        let _ = self.0.send(RecvState::Stop);
+    }
+}
+
+pub struct WPILOGWriter<T: TimeProvider + Clone + Send + Sync, W: Write + Send + 'static> {
     id: AtomicU32,
-    channel: Sender<RecvState>,
-    handle: JoinHandle<()>,
+    // channel has special drop handler because WPILOGWriter can't or the join method wouldn't be possible
+    channel: StopOnDropSender,
+    handle: JoinHandle<W>,
     time_provider: T,
 }
 
-impl<T: TimeProvider + Clone + Send + Sync> WPILOGWriter<T> {
+impl<T: TimeProvider + Clone + Send + Sync, W: Write + Send + 'static> WPILOGWriter<T, W> {
     /// # Panics
     ///
     /// Can panic is writer fails `write_all()`
-    pub fn new(mut writer: impl Write + Send + 'static, time_provider: T) -> WPILOGWriter<T> {
+    pub fn new(mut writer: W, time_provider: T) -> WPILOGWriter<T, W> {
         let (sender, recv) = kanal::unbounded();
 
         writer.write_all(HEADER_STRING).unwrap();
@@ -79,11 +98,13 @@ impl<T: TimeProvider + Clone + Send + Sync> WPILOGWriter<T> {
                     }
                 }
             }
+
+            writer
         });
 
         WPILOGWriter {
             id: AtomicU32::new(1),
-            channel: sender,
+            channel: StopOnDropSender(sender),
             handle,
             time_provider,
         }
@@ -122,14 +143,13 @@ impl<T: TimeProvider + Clone + Send + Sync> WPILOGWriter<T> {
     /// Instantly stops new messages from sending, and stops the worker after all previous messages have been written
     ///
     /// ANYTHING SENT AFTER THIS IS CALLED WILL NOT BE RECORDED, AND WILL BE LOST FOREVER!
-    pub fn join(self) -> Result<()> {
+    pub fn join(self) -> Result<W> {
         self.channel.send(RecvState::Stop)?;
 
-        if let Err(err) = self.handle.join() {
-            return Err(format_err!("{err:#?}"));
+        match self.handle.join() {
+            Err(err) => Err(format_err!("{err:#?}")),
+            Ok(val) => Ok(val),
         }
-
-        Ok(())
     }
 }
 

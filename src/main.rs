@@ -33,12 +33,14 @@ impl TimeProvider for NoopTimeProvider {
 }
 
 fn main() -> Result<()> {
-    let file = fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open("test2.wpilog")?;
+    // let file = fs::OpenOptions::new()
+    //     .write(true)
+    //     .create_new(true)
+    //     .open("test2.wpilog")?;
 
-    let writer = WPILOGWriter::new(file, NoopTimeProvider {});
+    let data = vec![];
+
+    let writer = WPILOGWriter::new(data, NoopTimeProvider {});
 
     let raw = writer.new_bytes_entry("NT:Primitives/raw".into(), None)?;
     let boolean = writer.new_bool_entry("NT:Primitives/boolean".into(), None)?;
@@ -103,21 +105,21 @@ fn main() -> Result<()> {
     let time = 5_000_000;
     int64.update_with_timestamp(8, time)?;
 
-    writer.join()?;
+    let data: &[u8] = &writer.join()?;
 
     // let data: &[u8] = &fs::read("test2.wpilog")?;
 
-    // let reader = WPILOGReader::new_raw(data)?;
+    let reader = WPILOGReader::new_raw(data)?;
 
-    // let mut records = 0;
-    // for record in reader.map(|item: PlainRecord| -> Record { item.try_into().unwrap() }) {
-    //     if records < 50 {
-    //         black_box(dbg!(record));
-    //     }
+    let mut records = 0;
+    for record in reader.map(|item: PlainRecord| -> Record { item.try_into().unwrap() }) {
+        if records < 50 {
+            // black_box(dbg!(record));
+        }
 
-    //     records += 1;
-    // }
+        records += 1;
+    }
 
-    // black_box(dbg!(records));
+    black_box(dbg!(records));
     Ok(())
 }

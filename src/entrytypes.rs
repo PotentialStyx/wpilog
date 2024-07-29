@@ -1,3 +1,5 @@
+use std::io::Write;
+
 use anyhow::Result;
 
 use crate::writer::{RawEntry, TimeProvider, WPILOGWriter};
@@ -23,7 +25,7 @@ macro_rules! new_entry_func {
     };
 }
 
-impl<T: TimeProvider + Clone + Send + Sync> WPILOGWriter<T> {
+impl<T: TimeProvider + Clone + Send + Sync, W: Write + Send + 'static> WPILOGWriter<T, W> {
     new_entry_func!(new_bytes_entry, BytesEntry, "raw");
 
     new_entry_func!(new_bool_entry, BooleanEntry, "boolean");
