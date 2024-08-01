@@ -88,8 +88,14 @@ impl<R: Read> Iterator for WPILOGReader<R> {
         let size_length = ((bitfield >> 2) & 0x3) + 1;
         let timestamp_length = ((bitfield >> 4) & 0x7) + 1;
 
+        // Entry has to be a u32 or smaller since the bitfield can only represent byte lengths of 1-4
+        #[allow(clippy::cast_possible_truncation)]
         let entry = self.read_variable_int_option(entry_length.into())? as u32;
+        // Entry has to be a u32 or smaller since the bitfield can only represent byte lengths of 1-4
+        // This code doesn't target lower than 32 bit systems so this cast will always be safe
+        #[allow(clippy::cast_possible_truncation)]
         let size = self.read_variable_int_option(size_length.into())? as usize;
+
         let timestamp = self.read_variable_int_option(timestamp_length.into())?;
 
         let mut data = vec![0; size].into_boxed_slice();

@@ -1,6 +1,6 @@
 use std::io::Write;
 
-use anyhow::Result;
+use anyhow::{format_err, Result};
 
 use crate::writer::{RawEntry, TimeProvider, WPILOGWriter};
 
@@ -217,7 +217,14 @@ impl<T: TimeProvider + Clone + Send + Sync> Entry<&[&str]> for StringArrayEntry<
         let length = 4 + 4 * data.len() + data.iter().map(|string| str::len(string)).sum::<usize>();
 
         let mut dest = vec![0; length].into_boxed_slice();
-        let size_encoded = (data.len() as u32).to_le_bytes();
+
+        let data_len: u32 = if let Ok(data_len) = data.len().try_into() {
+            data_len
+        } else {
+            return Err(format_err!("Data can have at max {} items", u32::MAX));
+        };
+
+        let size_encoded = data_len.to_le_bytes();
         dest[0] = size_encoded[0];
         dest[1] = size_encoded[1];
         dest[2] = size_encoded[2];

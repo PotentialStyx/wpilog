@@ -8,13 +8,13 @@ use std::{
 
 use crate::{ControlData, Record, RecordInfo, HEADER_STRING, HEADER_VERSION};
 
-pub const MAX_ONE_BYTE: u64 = 256u64;
-pub const MAX_TWO_BYTES: u64 = 256u64.pow(2);
-pub const MAX_THREE_BYTES: u64 = 256u64.pow(3);
-pub const MAX_FOUR_BYTES: u64 = 256u64.pow(4);
-pub const MAX_FIVE_BYTES: u64 = 256u64.pow(5);
-pub const MAX_SIX_BYTES: u64 = 256u64.pow(6);
-pub const MAX_SEVEN_BYTES: u64 = 256u64.pow(7);
+const MAX_ONE_BYTE: u64 = 256u64;
+const MAX_TWO_BYTES: u64 = 256u64.pow(2);
+const MAX_THREE_BYTES: u64 = 256u64.pow(3);
+const MAX_FOUR_BYTES: u64 = 256u64.pow(4);
+const MAX_FIVE_BYTES: u64 = 256u64.pow(5);
+const MAX_SIX_BYTES: u64 = 256u64.pow(6);
+const MAX_SEVEN_BYTES: u64 = 256u64.pow(7);
 
 fn encode_int(num: u64) -> Box<[u8]> {
     if num < MAX_ONE_BYTE {
@@ -97,6 +97,9 @@ impl<T: TimeProvider + Clone + Send + Sync, W: Write + Send + 'static> WPILOGWri
     /// This method returns a [`RawEntry`], which requires you enforce that data is given the right format.
     ///
     /// Messing up data formatting can result in tools being unable to interpret what your logged values actually mean.
+    ///
+    /// # Errors
+    /// This can error if the internal channel fails to send.
     pub fn make_entry(
         &self,
         name: String,
@@ -125,8 +128,12 @@ impl<T: TimeProvider + Clone + Send + Sync, W: Write + Send + 'static> WPILOGWri
     /// Instantly stops new messages from sending, and stops the worker after all previous messages have been written
     ///
     /// ANYTHING SENT AFTER THIS IS CALLED WILL NOT BE RECORDED, AND WILL BE LOST FOREVER!
+    ///
+    /// # Errors
+    /// If the internal thread errors
     pub fn join(self) -> Result<W> {
-        self.channel.send(RecvState::Stop)?;
+        // Try best to gracefully stop channel, it'll forcefully stop when dropped anyways
+        let _ = self.channel.send(RecvState::Stop);
 
         match self.handle.join() {
             Err(err) => Err(format_err!("{err:#?}")),
@@ -200,9 +207,13 @@ impl Record {
                 let size_data = encode_int(data.len() as u64);
 
                 let mut bitfield = 0;
-                // These HAVE to be u8's after the & 0x3/0x7
-                bitfield |= (((size_data.len() - 1) & 0x3) as u8) << 2;
-                bitfield |= (((timestamp_data.len() - 1) & 0x7) as u8) << 4;
+
+                // These HAVE to be u8's after the & 0x3/0x7 so there is no possible truncation
+                #[allow(clippy::cast_possible_truncation)]
+                {
+                    bitfield |= (((size_data.len() - 1) & 0x3) as u8) << 2;
+                    bitfield |= (((timestamp_data.len() - 1) & 0x7) as u8) << 4;
+                }
 
                 ret.push(bitfield);
 
@@ -229,10 +240,13 @@ impl Record {
 
                 let mut bitfield = 0;
 
-                // These HAVE to be u8's after the & 0x3/0x7
-                bitfield |= ((id_data.len() - 1) & 0x3) as u8;
-                bitfield |= (((size_data.len() - 1) & 0x3) as u8) << 2;
-                bitfield |= (((timestamp_data.len() - 1) & 0x7) as u8) << 4;
+                // These HAVE to be u8's after the & 0x3/0x7 so there is no possible truncation
+                #[allow(clippy::cast_possible_truncation)]
+                {
+                    bitfield |= ((id_data.len() - 1) & 0x3) as u8;
+                    bitfield |= (((size_data.len() - 1) & 0x3) as u8) << 2;
+                    bitfield |= (((timestamp_data.len() - 1) & 0x7) as u8) << 4;
+                }
 
                 ret[0] = bitfield;
 

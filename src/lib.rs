@@ -4,8 +4,8 @@
 
     // TODO: Remove these exceptions
     clippy::missing_errors_doc,
-    clippy::cast_possible_truncation,
-    clippy::too_many_lines,
+    // clippy::cast_possible_truncation,
+    // clippy::too_many_lines,
 )]
 
 static HEADER_STRING: &[u8; 6] = b"WPILOG";
