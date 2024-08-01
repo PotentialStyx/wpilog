@@ -2,22 +2,21 @@ use anyhow::{format_err, Result};
 use kanal::Sender;
 use std::{
     io::Write,
-    ops::Deref,
     sync::atomic::{AtomicU32, Ordering},
     thread::JoinHandle,
 };
 
 use crate::{ControlData, Record, RecordInfo, HEADER_STRING, HEADER_VERSION};
 
-pub(crate) const MAX_ONE_BYTE: u64 = 256u64;
-pub(crate) const MAX_TWO_BYTES: u64 = 256u64.pow(2);
-pub(crate) const MAX_THREE_BYTES: u64 = 256u64.pow(3);
-pub(crate) const MAX_FOUR_BYTES: u64 = 256u64.pow(4);
-pub(crate) const MAX_FIVE_BYTES: u64 = 256u64.pow(5);
-pub(crate) const MAX_SIX_BYTES: u64 = 256u64.pow(6);
-pub(crate) const MAX_SEVEN_BYTES: u64 = 256u64.pow(7);
+pub const MAX_ONE_BYTE: u64 = 256u64;
+pub const MAX_TWO_BYTES: u64 = 256u64.pow(2);
+pub const MAX_THREE_BYTES: u64 = 256u64.pow(3);
+pub const MAX_FOUR_BYTES: u64 = 256u64.pow(4);
+pub const MAX_FIVE_BYTES: u64 = 256u64.pow(5);
+pub const MAX_SIX_BYTES: u64 = 256u64.pow(6);
+pub const MAX_SEVEN_BYTES: u64 = 256u64.pow(7);
 
-pub(crate) fn encode_int(num: u64) -> Box<[u8]> {
+fn encode_int(num: u64) -> Box<[u8]> {
     if num < MAX_ONE_BYTE {
         Box::new([num as u8])
     } else if num < MAX_TWO_BYTES {
@@ -50,27 +49,9 @@ enum RecvState {
     Stop,
 }
 
-struct StopOnDropSender(Sender<RecvState>);
-
-impl Deref for StopOnDropSender {
-    type Target = Sender<RecvState>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl Drop for StopOnDropSender {
-    fn drop(&mut self) {
-        // Try our best to stop the thread...
-        let _ = self.0.send(RecvState::Stop);
-    }
-}
-
 pub struct WPILOGWriter<T: TimeProvider + Clone + Send + Sync, W: Write + Send + 'static> {
     id: AtomicU32,
-    // channel has special drop handler because WPILOGWriter can't or the join method wouldn't be possible
-    channel: StopOnDropSender,
+    channel: Sender<RecvState>,
     handle: JoinHandle<W>,
     time_provider: T,
 }
@@ -93,18 +74,19 @@ impl<T: TimeProvider + Clone + Send + Sync, W: Write + Send + 'static> WPILOGWri
                         writer.write_all(&data).unwrap();
                     }
                     RecvState::Stop => {
-                        writer.flush().unwrap();
                         break;
                     }
                 }
             }
+
+            writer.flush().unwrap();
 
             writer
         });
 
         WPILOGWriter {
             id: AtomicU32::new(1),
-            channel: StopOnDropSender(sender),
+            channel: sender,
             handle,
             time_provider,
         }
